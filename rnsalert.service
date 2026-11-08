@@ -9,9 +9,10 @@ User=rnsalert
 Group=rnsalert
 Restart=always
 RestartSec=30
-# Identity, delivery queue, alert states.
+# Identity, delivery queue, alert states, reading history. 0750 so members of the
+# rnsalert group can run "rnsalert dash"; the identity and queue stay private.
 StateDirectory=rnsalert
-StateDirectoryMode=0700
+StateDirectoryMode=0750
 
 # Your check commands run as this user, inside this sandbox. Loosen what they need
 # (e.g. ReadOnlyPaths=, SupplementaryGroups=), but keep the user unprivileged.
@@ -29,7 +30,7 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
-UMask=0077
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

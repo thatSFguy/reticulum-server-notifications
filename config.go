@@ -24,6 +24,7 @@ type Config struct {
 	Stagger     time.Duration // default: checks start within this long after their window begins
 	StaggerMode string        // "random" (fresh offset each window) or "spread" (fixed, evenly spaced)
 	Timeout     time.Duration // default command timeout
+	Retain      time.Duration // how long to keep reading history; 0 = forever
 
 	Alerts []*Alert
 }
@@ -81,7 +82,7 @@ func loadConfig(path string) (*Config, error) {
 	if fi, err := f.Stat(); err == nil && fi.Mode().Perm()&0o022 != 0 {
 		return nil, fmt.Errorf("%s is group- or world-writable (it holds commands); chmod go-w it", path)
 	}
-	c := &Config{Stagger: 15 * time.Second, StaggerMode: "random", Timeout: 30 * time.Second}
+	c := &Config{Stagger: 15 * time.Second, StaggerMode: "random", Timeout: 30 * time.Second, Retain: 400 * 24 * time.Hour}
 	var cur *Alert
 	var raw []map[string]string // per-alert keys, applied once globals are known
 	var lines []map[string]int
@@ -189,6 +190,8 @@ func (c *Config) setGlobal(k, v string) error {
 		c.StaggerMode = v
 	case "timeout":
 		c.Timeout, err = parseDuration(v, false)
+	case "retain":
+		c.Retain, err = parseDuration(v, true)
 	default:
 		return fmt.Errorf("unknown global key %q (alert keys go under an [alert NAME] section)", k)
 	}
@@ -329,10 +332,19 @@ type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
+// parseDuration is time.ParseDuration plus whole days ("400d").
 func parseDuration(s string, zeroOK bool) (time.Duration, error) {
-	d, err := time.ParseDuration(s)
+	var d time.Duration
+	var err error
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		var days int
+		days, err = strconv.Atoi(n)
+		d = time.Duration(days) * 24 * time.Hour
+	} else {
+		d, err = time.ParseDuration(s)
+	}
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("%q is not a duration (e.g. 30s, 5m, 1h, 7d)", s)
 	}
 	if d < 0 || (d == 0 && !zeroOK) {
 		return 0, fmt.Errorf("must be positive")

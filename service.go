@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,21 +17,34 @@ type service struct {
 	cfg       *Config
 	out       *outbox
 	stateFile string
+	series    string
 
 	mu       sync.Mutex
 	trackers map[string]*tracker
 }
 
 func runService(ctx context.Context, cfg *Config, state string) error {
-	if err := os.MkdirAll(state, 0o700); err != nil {
+	// 0750: members of the service's group may read alert states and history (the
+	// dashboard); the identity and the message queue stay 0600/0700.
+	if err := os.MkdirAll(state, 0o750); err != nil {
 		return err
 	}
 	out, err := newOutbox(cfg, state)
 	if err != nil {
 		return err
 	}
-	s := &service{cfg: cfg, out: out, stateFile: filepath.Join(state, "alerts.json")}
+	s := &service{cfg: cfg, out: out, stateFile: filepath.Join(state, "alerts.json"), series: filepath.Join(state, "series")}
 	s.load()
+	go func() {
+		for {
+			pruneSeries(s.series, cfg.Retain, time.Now())
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(24 * time.Hour):
+			}
+		}
+	}()
 
 	var wg sync.WaitGroup
 	for i, a := range cfg.Alerts {
@@ -67,6 +81,13 @@ func (s *service) check(ctx context.Context, a *Alert) {
 		return // shutting down: a killed command isn't a reading
 	}
 	now := time.Now()
+	v := r.Value
+	if r.Err != nil {
+		v = math.NaN() // a gap in the graph
+	}
+	if err := appendPoint(s.series, a.Name, now, v); err != nil {
+		log.Printf("%s: history: %v", a.Name, err)
+	}
 	s.mu.Lock()
 	t := s.trackers[a.Name]
 	if t == nil {
@@ -119,7 +140,7 @@ func (s *service) save() {
 	for k, t := range s.trackers {
 		data[k] = *t
 	}
-	err := writeJSON(s.stateFile, data)
+	err := writeJSONMode(s.stateFile, data, 0o640)
 	s.mu.Unlock()
 	if err != nil {
 		log.Printf("state: %v", err)

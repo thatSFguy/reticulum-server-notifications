@@ -336,13 +336,15 @@ func (o *outbox) restoreKnown() {
 }
 
 // writeJSON replaces path atomically (0600: it's ours alone).
-func writeJSON(path string, v any) error {
+func writeJSON(path string, v any) error { return writeJSONMode(path, v, 0o600) }
+
+func writeJSONMode(path string, v any, mode os.FileMode) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, data, mode); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

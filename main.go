@@ -5,6 +5,8 @@
 //	rnsalert run            the service: check on schedule, deliver messages
 //	rnsalert test [NAME…]   run the checks once and print what would be sent (sends nothing)
 //	rnsalert check-config   exit 0 if the config is valid
+//	rnsalert dash           terminal dashboard of current values and history
+//	rnsalert graph NAME     print one alert's chart and trend (-range 7d, -height 16)
 //
 // It opens no port: it dials out to one Reticulum TCP node.
 package main
@@ -25,7 +27,7 @@ func main() {
 	confPath := flag.String("config", "/etc/rnsalert.conf", "config file")
 	state := flag.String("state", "/var/lib/rnsalert", "state directory (identity, queue, alert states)")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: rnsalert [flags] run | test [NAME...] | check-config")
+		fmt.Fprintln(os.Stderr, "usage: rnsalert [flags] run | test [NAME...] | check-config | dash | graph [-range 24h] [-height 16] NAME")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -53,6 +55,25 @@ func main() {
 	case "test":
 		if !test(cfg, flag.Args()[1:]) {
 			os.Exit(1)
+		}
+	case "dash":
+		if err := runDash(cfg, *state); err != nil {
+			log.Fatal(err)
+		}
+	case "graph":
+		fs := flag.NewFlagSet("graph", flag.ExitOnError)
+		rng := fs.String("range", "24h", "how far back (e.g. 1h, 24h, 7d, 30d, 365d)")
+		height := fs.Int("height", 16, "chart height in lines")
+		fs.Parse(flag.Args()[1:])
+		span, err := parseDuration(*rng, false)
+		if err != nil {
+			log.Fatalf("-range: %v", err)
+		}
+		if fs.NArg() != 1 {
+			log.Fatal("usage: rnsalert graph [-range 24h] [-height 16] NAME")
+		}
+		if err := runGraph(cfg, *state, fs.Arg(0), span, max(4, *height)); err != nil {
+			log.Fatal(err)
 		}
 	case "check-config":
 		if cfg.Node == "" {

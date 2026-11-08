@@ -6,6 +6,10 @@ states, and sends an [LXMF](https://github.com/markqvist/LXMF) message over
 Sideband, MeshChat or any other LXMF app. You don't need an internet push service, an account
 or an open port: rnsalert dials out to one Reticulum TCP node.
 
+Every reading is also kept as history. `rnsalert dash` shows that history as graphs in the
+terminal, so you can watch growth and change over SSH. It doesn't need a web server or a
+database.
+
 ```
 CRITICAL LOW ── LOW WARNING ──  SAFE  ── HIGH WARNING ── CRITICAL HIGH
            critical_low   low_warning   high_warning   critical_high
@@ -38,6 +42,8 @@ and no other services, and builds to one static binary.
   with backoff. After a few failed direct tries it goes to an LXMF propagation node (if one is
   configured), where it waits for a phone that's offline. Alert states are saved, so a restart
   doesn't send everything again.
+- **History:** every reading is written to a small built-in time-series store (see below), and
+  `rnsalert dash` and `rnsalert graph` draw it.
 
 ## Install
 
@@ -60,14 +66,68 @@ from its LXMF address (it's in the journal); give it a nickname in your app.
 ## Commands
 
 ```
-rnsalert [-config /etc/rnsalert.conf] [-state /var/lib/rnsalert] run | test [NAME...] | check-config
+rnsalert [-config /etc/rnsalert.conf] [-state /var/lib/rnsalert] COMMAND
 ```
 
 - `run` starts the service.
-- `test` runs every check (or only the named ones) once and prints the state, title and
-  message it would send. It sends nothing and doesn't need the node, so use it while writing
+- `test [NAME...]` runs every check (or only the named ones) once and prints the state, title
+  and message it would send. It sends nothing and doesn't need the node, so use it while writing
   commands. It exits 1 if any check errors.
 - `check-config` validates the file, including dry-running every template.
+- `dash` opens the interactive terminal dashboard.
+- `graph [-range 24h] [-height 16] NAME` prints one alert's chart and stats to stdout, for
+  scripts, cron mail or a quick look.
+
+## Dashboard and history
+
+`rnsalert dash` opens a full-screen view in any terminal, including over SSH:
+
+- **The list** has one row per alert: its current value, its state in colour, a sparkline of the
+  selected range, the change over that range, and the trend per day.
+- **The graph** (press enter) is a braille line chart of one alert. The threshold lines are drawn
+  in their state colours, and failed checks show as gaps. Under it you get min/avg/max, the change
+  since the start of the range, the least-squares trend, and a projection such as
+  *"at this rate HIGH WARNING (85%) in ~24d"*. The projection only appears when the trend line
+  actually fits the data (R² ≥ 0.6). A daily temperature cycle doesn't get a forecast; a filling
+  disk does.
+- **Keys:** `↑↓`/`jk` select, `enter` opens the graph, `esc` goes back, `1`–`6` or `+`/`-`
+  choose the range (1h, 6h, 24h, 7d, 30d, 1y), and `q` quits. The view refreshes every 5s.
+  `NO_COLOR` turns colour off.
+
+```
+Disk /  71.73%  SAFE  (last 30d)
+
+    95 ┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+       ┤
+    85 ┤┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+       ┤
+ 72.18 ┤                                                                          ⣀⣀⣀⣀⣀⣀⣀⣀⣤⣤⠤⠤⠤⠤⠤⠤⠴⠶
+       ┤                                          ⢀⣀⣀⣀⣀⣀⣀⣀⣠⣤⠤⠤⠤⠤⠤⠤⠴⠶⠒⠒⠒⠒⠒⠒⠚⠛⠉⠉⠉⠉⠉⠉⠉⠉
+       ┤           ⣀⣀⣀⣀⣀⣀⣀⣀⣤⣤⠤⠤⠤⠤⠤⠴⠶⠖⠒⠒⠒⠒⠒⠚⠛⠋⠉⠉⠉⠉⠉⠉⠉⠁
+ 55.15 ┤⠒⠒⠒⠛⠛⠉⠉⠉⠉⠉⠉⠉⠉
+        Oct 9                                      Oct 24                                      Nov 8
+
+min 55.03%   avg 63.4%   max 71.79%   8639 readings
+change +16.48% (+29.82%) since Oct 9 13:35   trend +0.55%/day
+at this rate HIGH WARNING (85%) in ~24d
+```
+
+**Storage.** The history is a tiny append-only time-series store: one file per alert per
+UTC month under `<state>/series/`, with 16-byte records (unix ms + float64). A failed check is
+stored as NaN. A reading a minute costs about 8 MB per alert per year. `retain` (default
+`400d`, `0` = forever) drops whole months once they're old enough. The dashboard reads the files
+directly and caches what it has read, so a refresh only reads the new records. It needs nothing
+but read access.
+
+**Who can view it.** The state directory is `0750`, and the history and alert states are
+group-readable. Add yourself to the service's group to run the dashboard without root:
+
+```sh
+sudo usermod -aG rnsalert $USER   # log in again, then:
+rnsalert dash
+```
+
+The identity key (`0600`) and the message queue (`0700`) stay private to the service.
 
 ## Config
 

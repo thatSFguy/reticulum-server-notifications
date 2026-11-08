@@ -29,13 +29,17 @@ stagger_mode = random
 # Default command timeout (per-alert override: timeout). Must not exceed the alert's every.
 timeout = 30s
 
+# How long to keep reading history for "rnsalert dash" / "rnsalert graph" (whole months
+# are dropped once older than this). 0 = forever. ~8 MB per alert per year at every = 1m.
+retain = 400d
+
 # ---- Alerts --------------------------------------------------------------------------
 #
 # [alert NAME]
 #   command        shell command (/bin/sh -c) that prints the value: the first field of
 #                  its first non-empty line must be a number (a trailing % is allowed).
 #                  A non-zero exit, timeout or non-number is the ERROR state.
-#   every          how often to check (Go duration: 30s, 5m, 1h). Required.
+#   every          how often to check (30s, 5m, 1h, 1d). Required.
 #
 #   The five states. Set any of the four thresholds (at least one); SAFE is everything
 #   between them. Thresholds are inclusive and must increase in this order:

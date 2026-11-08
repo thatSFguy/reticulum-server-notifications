@@ -79,4 +79,8 @@ func TestServiceAlertsPhone(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(state, "alerts.json")); err != nil {
 		t.Errorf("alert state not saved: %v", err)
 	}
+	pts := newSeriesReader(filepath.Join(state, "series"), "Boiler").read(time.Now().Add(-time.Hour), time.Now())
+	if len(pts) == 0 || pts[0].V != 97.5 {
+		t.Errorf("history not recorded: %v", pts)
+	}
 }
