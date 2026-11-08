@@ -1,0 +1,35 @@
+[Unit]
+Description=rnsalert: threshold alerts over Reticulum (LXMF)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/rnsalert -config /etc/rnsalert.conf run
+User=rnsalert
+Group=rnsalert
+Restart=always
+RestartSec=30
+# Identity, delivery queue, alert states.
+StateDirectory=rnsalert
+StateDirectoryMode=0700
+
+# Your check commands run as this user, inside this sandbox. Loosen what they need
+# (e.g. ReadOnlyPaths=, SupplementaryGroups=), but keep the user unprivileged.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

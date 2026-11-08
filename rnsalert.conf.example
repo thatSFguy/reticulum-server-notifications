@@ -1,0 +1,101 @@
+# rnsalert config. "key = value" lines; a comment starts with # at the start of a line
+# or after a space (write \# for a literal one there). Install as /etc/rnsalert.conf,
+# owned by root, mode 0640 root:rnsalert — rnsalert refuses a config others can edit,
+# since it holds the commands it runs.
+
+# ---- Global settings ---------------------------------------------------------------
+
+# Reticulum TCP node to dial out to (a transport node or rnsd with a TCP server interface).
+node = rns.example.org:4242
+
+# Default recipients: LXMF addresses (32 hex digits, as Sideband shows them; <> optional),
+# comma-separated. An alert can override with its own "to".
+to = <0123456789abcdef0123456789abcdef>
+
+# Optional LXMF propagation node: messages wait there when a recipient is offline.
+#propagation = <fedcba9876543210fedcba9876543210>
+
+# Optional display name to announce. Empty: apps show just the address.
+#name = rnsalert@myhost
+
+# Checks start within this long after their window begins, so alerts sharing a schedule
+# don't all fire at second :00. Per-alert override: stagger. 0 = no stagger.
+stagger = 20s
+
+# random: a fresh random offset every window (default).
+# spread: a fixed offset per alert, evenly spaced across the stagger in config order.
+stagger_mode = random
+
+# Default command timeout (per-alert override: timeout). Must not exceed the alert's every.
+timeout = 30s
+
+# ---- Alerts --------------------------------------------------------------------------
+#
+# [alert NAME]
+#   command        shell command (/bin/sh -c) that prints the value: the first field of
+#                  its first non-empty line must be a number (a trailing % is allowed).
+#                  A non-zero exit, timeout or non-number is the ERROR state.
+#   every          how often to check (Go duration: 30s, 5m, 1h). Required.
+#
+#   The five states. Set any of the four thresholds (at least one); SAFE is everything
+#   between them. Thresholds are inclusive and must increase in this order:
+#   critical_low   value <= this is CRITICAL LOW
+#   low_warning    value <= this is LOW WARNING
+#                  (otherwise SAFE)
+#   high_warning   value >= this is HIGH WARNING
+#   critical_high  value >= this is CRITICAL HIGH
+#
+#   message        message template (Go text/template; \n for a newline). Fields:
+#                  {{.Name}} {{.State}} {{.Prev}} {{.Value}} {{.Unit}} {{.Threshold}}
+#                  {{.Output}} {{.Error}} {{.Host}} {{.Time}} {{.Repeat}}
+#   title          title template (default "{{.Name}}: {{.State}}")
+#   message.STATE  per-state override, e.g. message.critical_high = ...
+#   title.STATE    (states: critical_low low_warning safe high_warning critical_high error)
+#   to             recipients for this alert (default: the global "to")
+#   unit           shown after the value, e.g. %, °C
+#   notify         which states send a message when entered (default: all six).
+#                  Entering "safe" is the recovery message. The first reading after
+#                  install never sends SAFE.
+#   repeat         re-send while in a non-SAFE state this often (default 0: only on change)
+#   confirm        readings in a row needed before a state change counts (default 1)
+#   hysteresis     how far past a threshold the value must come back before the alert
+#                  steps down toward SAFE (default 0)
+#   stagger, timeout   per-alert overrides of the globals
+
+[alert Disk /]
+command       = df --output=pcent / | tail -n 1
+every         = 5m
+unit          = %
+high_warning  = 85
+critical_high = 95
+hysteresis    = 2
+repeat        = 6h
+
+[alert Load average]
+command       = cut -d' ' -f1 /proc/loadavg
+every         = 1m
+high_warning  = 4
+critical_high = 8
+confirm       = 3
+message       = {{.Host}} 1-min load {{.Value}}{{if .Prev}} (was {{.Prev}}){{end}}
+
+[alert Free memory]
+command       = awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo
+every         = 1m
+unit          = MB
+critical_low  = 200
+low_warning   = 500
+confirm       = 2
+
+[alert Greenhouse temp]
+command       = cat /sys/bus/w1/devices/28-*/temperature | awk '{print $1/1000}'
+every         = 2m
+unit          = °C
+critical_low  = 2
+low_warning   = 5
+high_warning  = 32
+critical_high = 38
+hysteresis    = 0.5
+message.critical_low  = Frost risk! Greenhouse at {{.Value}}{{.Unit}}.
+message.critical_high = Greenhouse overheating: {{.Value}}{{.Unit}} — open the vents.
+message.error         = Can't read the greenhouse sensor: {{.Error}}
